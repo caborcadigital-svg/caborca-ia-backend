@@ -14,6 +14,7 @@ const reportesRoutes = require('./routes/reportes');
 const deportesRoutes = require('./routes/deportes');
 const negociosRoutes = require('./routes/negocios');
 const adminRoutes = require('./routes/admin');
+const adminNegociosRoutes = require('./routes/adminNegocios');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -60,4 +61,21 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/clima', climaRoutes);
 app.use('/api/noticias', noticiasRoutes);
 app.use('/api/eventos', eventosRoutes);
-app.use('/api/repor
+app.use('/api/reportes', reportesRoutes);
+app.use('/api/deportes', deportesRoutes);
+app.use('/api/negocios', negociosRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/admin/negocios', adminNegociosRoutes);
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', service: 'Caborca IA API', timestamp: new Date().toISOString() });
+});
+
+app.use((err, req, res, next) => {
+  logger.error(err.stack);
+  res.status(500).json({ error: 'Error interno del servidor' });
+});
+
+app.listen(PORT, () => {
+  logger.info(`Caborca IA Backend corriendo en puerto ${PORT}`);
+});
