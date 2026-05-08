@@ -20,10 +20,22 @@ const PORT = process.env.PORT || 4000;
 
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: function(origin, callback) {
+    const allowed = [
+      process.env.FRONTEND_URL,
+      process.env.FRONTEND_URL_2,
+      'https://caborca.app',
+      'https://www.caborca.app',
+      'http://localhost:3000',
+    ];
+    if (!origin || allowed.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
-}));
-app.use(express.json({ limit: '10mb' }));
+}));app.use(express.json({ limit: '10mb' }));
 
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
