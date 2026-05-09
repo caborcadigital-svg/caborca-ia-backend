@@ -1,94 +1,116 @@
 const OpenAI = require('openai');
+const axios = require('axios');
 const { logger } = require('../utils/logger');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const SYSTEM_PROMPT = `Eres Caborca IA, el asistente oficial e inteligente de Heroica Caborca, Sonora, México.
+const SYSTEM_PROMPT = `Eres Caborca IA, el asistente oficial de Heroica Caborca, Sonora, México.
+Hablas en español mexicano natural. Eres preciso, útil y honesto.
+Si tienes resultados de búsqueda web en el contexto, úsalos para responder.
+Cuando uses info de internet menciona la fuente brevemente.
+Máximo 3 párrafos. Usa emojis ocasionalmente.
+Solo hablas de temas relacionados con Caborca, Sonora.`;
 
-IDENTIDAD:
-- Eres 100% local de Caborca, Sonora
-- Hablas en español mexicano natural y amigable
-- Eres preciso, útil y honesto
+async function buscarEnInternet(query) {
+  try {
+    const res = await axios.get('https://api.duckduckgo.com/', {
+      params: {
+        q: `${query} Caborca Sonora`,
+        format: 'json',
+        no_html: 1,
+        skip_disambig: 1,
+      },
+      timeout: 5000,
+    });
 
-INSTRUCCIONES IMPORTANTES:
-1. Primero revisa el contexto local provisto (Supabase)
-2. Si el contexto no tiene la información, usa tu herramienta de búsqueda web para buscar en Google, Wikipedia y otros portales
-3. Siempre busca información específica de Caborca, Sonora cuando no la tengas
-4. Cuando uses información de internet, menciona brevemente la fuente
-5. NUNCA inventes información — si no encuentras nada, dilo claramente
+    const data = res.data;
+    const resultados = [];
 
-TEMAS QUE PUEDES RESPONDER:
-- Clima, noticias, eventos, reportes, negocios, deportes de Caborca
-- Historia, cultura, lugares, personas y equipos de Caborca
-- Cualquier pregunta relacionada con Heroica Caborca, Sonora
+    if (data.AbstractText) {
+      resultados.push(`[${data.AbstractSource}] ${data.AbstractText}`);
+    }
 
-TEMAS FUERA DE SCOPE:
-- Preguntas sin relación alguna con Caborca o Sonora
+    if (data.RelatedTopics?.length) {
+      data.RelatedTopics.slice(0, 3).forEach(t => {
+        if (t.Text) resultados.push(`- ${t.Text}`);
+      });
+    }
 
-CONOCIMIENTO LOCAL:
-- Caborca está en el noroeste de Sonora, México, cerca de la frontera con Arizona
-- Temperatura extrema en verano (hasta 50°C), inviernos suaves
-- Economía: agricultura (espárrago, uva), minería y ganadería
-- La Misión de la Purísima Concepción es el monumento histórico más importante
-- Colonias: Centro, INFONAVIT, Villas del Real, Bella Vista, El Ranchito
-- Equipos deportivos conocidos: Los Rojos de Caborca (béisbol)
+    if (data.Answer) {
+      resultados.push(`Respuesta directa: ${data.Answer}`);
+    }
 
-FORMATO:
-- Máximo 3 párrafos, conciso y directo
-- Usa emojis ocasionalmente para hacerlo amigable
-- Si es información de internet, indica "Según [fuente]..."`;
+    return resultados.length ? resultados.join('\n') : null;
+  } catch (err) {
+    logger.error('Error búsqueda web:', err.message);
+    return null;
+  }
+}
+
+async function necesitaBusqueda(mensaje, contexto) {
+  const tieneContexto = contexto.noticias?.length || contexto.negocios?.length ||
+    contexto.eventos?.length || contexto.deportes?.length;
+
+  const palabrasClave = ['quién', 'quien', 'qué es', 'que es', 'historia', 'cuándo', 'cuando',
+    'cómo', 'como', 'dónde', 'donde', 'equipo', 'rojos', 'liga', 'torneo', 'iglesia',
+    'misión', 'mision', 'fundación', 'fundacion', 'alcalde', 'presidente', 'famoso'];
+
+  const necesita = palabrasClave.some(p => mensaje.toLowerCase().includes(p));
+  return necesita || !tieneContexto;
+}
 
 async function askOpenAI(mensaje, contexto = {}, historial = []) {
   try {
     const contextoParts = [];
 
     if (contexto.clima) {
-      contextoParts.push(`CLIMA ACTUAL EN CABORCA:
-- Temperatura: ${contexto.clima.temperatura}°C (sensación ${contexto.clima.sensacion}°C)
-- Condición: ${contexto.clima.descripcion}
-- Humedad: ${contexto.clima.humedad}% | Viento: ${contexto.clima.viento} km/h
-- Máxima: ${contexto.clima.maxima}°C / Mínima: ${contexto.clima.minima}°C`);
-    }
-
-    if (contexto.eventos?.length) {
-      const evts = contexto.eventos.slice(0, 5).map(e =>
-        `- ${e.nombre} | ${new Date(e.fecha_inicio).toLocaleDateString('es-MX')} | ${e.lugar || 'Por confirmar'}`
-      ).join('\n');
-      contextoParts.push(`EVENTOS PRÓXIMOS EN CABORCA:\n${evts}`);
+      contextoParts.push(`CLIMA ACTUAL: ${contexto.clima.temperatura}°C, ${contexto.clima.descripcion}, humedad ${contexto.clima.humedad}%, viento ${contexto.clima.viento} km/h, máx ${contexto.clima.maxima}° mín ${contexto.clima.minima}°`);
     }
 
     if (contexto.noticias?.length) {
-      const news = contexto.noticias.slice(0, 5).map(n => `- ${n.titulo} (${n.categoria})`).join('\n');
-      contextoParts.push(`NOTICIAS RECIENTES DE CABORCA:\n${news}`);
+      const news = contexto.noticias.slice(0, 5).map(n => `- ${n.titulo}`).join('\n');
+      contextoParts.push(`NOTICIAS RECIENTES:\n${news}`);
+    }
+
+    if (contexto.eventos?.length) {
+      const evts = contexto.eventos.slice(0, 4).map(e =>
+        `- ${e.nombre} | ${new Date(e.fecha_inicio).toLocaleDateString('es-MX')} | ${e.lugar || ''}`
+      ).join('\n');
+      contextoParts.push(`EVENTOS PRÓXIMOS:\n${evts}`);
     }
 
     if (contexto.negocios?.length) {
-      const negs = contexto.negocios.slice(0, 8).map(n => {
-        const fuente = n.fuente === 'google_places' ? ' [Google Maps]' : '';
-        const dir = n.direccion ? ` | ${n.direccion}` : '';
-        const tel = n.telefono ? ` | Tel: ${n.telefono}` : '';
-        return `- ${n.nombre} (${n.categoria})${dir}${tel}${fuente}`;
-      }).join('\n');
-      contextoParts.push(`NEGOCIOS REGISTRADOS EN CABORCA:\n${negs}`);
+      const negs = contexto.negocios.slice(0, 6).map(n =>
+        `- ${n.nombre} (${n.categoria})${n.direccion ? ' | ' + n.direccion : ''}${n.telefono ? ' | ' + n.telefono : ''}`
+      ).join('\n');
+      contextoParts.push(`NEGOCIOS EN CABORCA:\n${negs}`);
     }
 
     if (contexto.deportes?.length) {
-      const dep = contexto.deportes.slice(0, 5).map(p =>
-        `- ${p.equipo_local} ${p.marcador_local ?? '?'}-${p.marcador_visitante ?? '?'} ${p.equipo_visitante} (${p.liga} | ${p.deporte})`
+      const dep = contexto.deportes.slice(0, 4).map(p =>
+        `- ${p.equipo_local} ${p.marcador_local ?? '?'}-${p.marcador_visitante ?? '?'} ${p.equipo_visitante} (${p.liga})`
       ).join('\n');
-      contextoParts.push(`RESULTADOS DEPORTIVOS RECIENTES:\n${dep}`);
+      contextoParts.push(`DEPORTES:\n${dep}`);
     }
 
     if (contexto.reportes?.length) {
-      const reps = contexto.reportes.slice(0, 5).map(r =>
-        `- [${r.tipo.toUpperCase()}] ${r.descripcion} | ${r.ubicacion}`
+      const reps = contexto.reportes.slice(0, 4).map(r =>
+        `- [${r.tipo}] ${r.descripcion} | ${r.ubicacion}`
       ).join('\n');
-      contextoParts.push(`REPORTES CIUDADANOS ACTIVOS:\n${reps}`);
+      contextoParts.push(`REPORTES ACTIVOS:\n${reps}`);
+    }
+
+    if (await necesitaBusqueda(mensaje, contexto)) {
+      logger.info(`Buscando en internet: "${mensaje}"`);
+      const webResult = await buscarEnInternet(mensaje);
+      if (webResult) {
+        contextoParts.push(`RESULTADOS DE BÚSQUEDA WEB:\n${webResult}`);
+      }
     }
 
     const systemContent = contextoParts.length
-      ? `${SYSTEM_PROMPT}\n\n=== CONTEXTO LOCAL DISPONIBLE ===\n${contextoParts.join('\n\n')}\n=== FIN CONTEXTO ===\n\nSi el contexto anterior no responde la pregunta del usuario, usa la búsqueda web para encontrar información.`
-      : `${SYSTEM_PROMPT}\n\nNo hay contexto local disponible. Usa la búsqueda web para responder preguntas sobre Caborca.`;
+      ? `${SYSTEM_PROMPT}\n\n=== CONTEXTO ===\n${contextoParts.join('\n\n')}\n=== FIN ===`
+      : SYSTEM_PROMPT;
 
     const messages = [
       { role: 'system', content: systemContent },
@@ -96,38 +118,22 @@ async function askOpenAI(mensaje, contexto = {}, historial = []) {
       { role: 'user', content: mensaje },
     ];
 
-    const response = await openai.responses.create({
+    const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      instructions: systemContent,
-      input: mensaje,
-      tools: [{ type: 'web_search_preview' }],
-      max_output_tokens: 600,
+      messages,
+      max_tokens: 600,
+      temperature: 0.6,
     });
 
-    const respuesta = response.output_text;
-    logger.info(`OpenAI web search: "${mensaje.slice(0, 50)}"`);
+    const respuesta = response.choices[0].message.content;
+    const tokens = response.usage?.total_tokens || 0;
+    logger.info(`OpenAI: ${tokens} tokens`);
 
-    return respuesta || 'No pude obtener una respuesta en este momento.';
+    return respuesta;
   } catch (err) {
     logger.error('Error OpenAI:', err.message);
-
-    try {
-      const fallback = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          ...historial.slice(-4),
-          { role: 'user', content: mensaje },
-        ],
-        max_tokens: 500,
-        temperature: 0.6,
-      });
-      return fallback.choices[0].message.content;
-    } catch (fallbackErr) {
-      logger.error('Fallback OpenAI error:', fallbackErr.message);
-      if (err.status === 429) return 'El asistente está recibiendo muchas consultas. Intenta en unos segundos.';
-      return 'Lo siento, el asistente IA no está disponible en este momento.';
-    }
+    if (err.status === 429) return 'El asistente está ocupado. Intenta en unos segundos.';
+    return 'Lo siento, el asistente no está disponible en este momento.';
   }
 }
 
