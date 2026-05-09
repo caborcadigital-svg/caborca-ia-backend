@@ -15,6 +15,7 @@ const deportesRoutes = require('./routes/deportes');
 const negociosRoutes = require('./routes/negocios');
 const adminRoutes = require('./routes/admin');
 const adminNegociosRoutes = require('./routes/adminNegocios');
+const publicidadRoutes = require('./routes/publicidad');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -66,6 +67,7 @@ app.use('/api/deportes', deportesRoutes);
 app.use('/api/negocios', negociosRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin/negocios', adminNegociosRoutes);
+app.use('/api/publicidad', publicidadRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'Caborca IA API', timestamp: new Date().toISOString() });
