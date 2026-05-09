@@ -18,12 +18,13 @@ const INTENTS = {
   SALUDO: /^(hola|buenas|buenos|hi|hey|que tal|qué tal|como estas|cómo estás|buenas tardes|buenas noches|buenos días)[\s!?.]*$/i,
 };
 
-async function buscarTavily(query) {
+async function buscarTavily(query, incluirCaborca = true) {
   if (!process.env.TAVILY_API_KEY) return null;
   try {
+    const queryFinal = incluirCaborca ? `${query} Caborca Sonora` : query;
     const res = await axios.post('https://api.tavily.com/search', {
       api_key: process.env.TAVILY_API_KEY,
-      query: `${query} Caborca Sonora México`,
+      query: queryFinal,
       search_depth: 'basic',
       max_results: 5,
       include_answer: true,
@@ -36,16 +37,25 @@ async function buscarTavily(query) {
 
     if (data.results?.length) {
       data.results.slice(0, 4).forEach(r => {
-        if (r.content) partes.push(`[${r.title}] ${r.content.slice(0, 300)}`);
+        if (r.content) partes.push(`[${r.title}] ${r.content.slice(0, 400)}`);
       });
     }
 
-    logger.info(`Tavily respondió con ${partes.length} resultados para: "${query}"`);
+    logger.info(`Tavily (${queryFinal}): ${partes.length} resultados`);
     return partes.length ? partes.join('\n\n') : null;
   } catch (err) {
     logger.error('Error Tavily:', err.message);
     return null;
   }
+}
+
+async function buscarConFallback(mensaje) {
+  let resultado = await buscarTavily(mensaje, true);
+  if (!resultado) {
+    logger.info('Tavily sin resultados con Caborca, intentando sin ubicacion...');
+    resultado = await buscarTavily(mensaje, false);
+  }
+  return resultado;
 }
 
 function tieneIntentEspecifico(lower) {
@@ -60,7 +70,7 @@ async function resolveIntent(mensaje, historial = []) {
   if (INTENTS.SALUDO.test(lower.trim())) {
     return {
       tipo: 'directo',
-      respuesta: '¡Hola! Soy Caborca IA, tu asistente inteligente de Heroica Caborca, Sonora. ¿En qué puedo ayudarte hoy? Puedo darte información sobre el clima, negocios, eventos, noticias, deportes, reportes ciudadanos y mucho más sobre Caborca.',
+      respuesta: '¡Hola! Soy Caborca IA, tu asistente inteligente de Heroica Caborca, Sonora. ¿En qué puedo ayudarte hoy? Puedo darte info sobre clima, negocios, eventos, noticias, deportes, reportes ciudadanos y mucho más 😊',
       fuente: 'sistema',
     };
   }
@@ -78,12 +88,10 @@ async function resolveIntent(mensaje, historial = []) {
   if (INTENTS.DEPORTES.test(lower)) {
     const deportes = await getDeportes({ limit: 5 });
     contexto.deportes = deportes;
-    if (!INTENTS.NEGOCIOS.test(lower) && !INTENTS.NOTICIAS.test(lower) && deportes?.length) {
-      const webResult = await buscarTavily(mensaje);
-      if (webResult) contexto.webSearch = webResult;
-      const respuestaIA = await askOpenAI(mensaje, contexto, historial);
-      return { tipo: 'ia', respuesta: respuestaIA, fuente: 'openai', data: contexto };
-    }
+    const webResult = await buscarConFallback(mensaje);
+    if (webResult) contexto.webSearch = webResult;
+    const respuestaIA = await askOpenAI(mensaje, contexto, historial);
+    return { tipo: 'ia', respuesta: respuestaIA, fuente: 'openai', data: contexto };
   }
 
   if (INTENTS.REPORTES.test(lower)) {
@@ -99,6 +107,8 @@ async function resolveIntent(mensaje, historial = []) {
   if (INTENTS.NOTICIAS.test(lower)) {
     const noticias = await getNoticias({ limit: 5 });
     contexto.noticias = noticias;
+    const webResult = await buscarConFallback(mensaje);
+    if (webResult) contexto.webSearch = webResult;
   }
 
   if (INTENTS.NEGOCIOS.test(lower)) {
@@ -106,9 +116,9 @@ async function resolveIntent(mensaje, historial = []) {
     contexto.negocios = negocios;
   }
 
-  if (!tieneIntentEspecifico(lower) || Object.keys(contexto).length === 0) {
-    logger.info(`Sin intent específico, buscando en Tavily: "${mensaje}"`);
-    const webResult = await buscarTavily(mensaje);
+  if (!tieneIntentEspecifico(lower)) {
+    logger.info(`Sin intent especifico, buscando en Tavily: "${mensaje}"`);
+    const webResult = await buscarConFallback(mensaje);
     if (webResult) contexto.webSearch = webResult;
   }
 
@@ -119,24 +129,6 @@ async function resolveIntent(mensaje, historial = []) {
 function formatClima(c) {
   if (!c) return 'No pude obtener el clima en este momento.';
   return `🌡️ **Clima en Caborca ahora mismo:**\n- Temperatura: ${c.temperatura}°C (sensación ${c.sensacion}°C)\n- Condición: ${c.descripcion}\n- Humedad: ${c.humedad}%\n- Viento: ${c.viento} km/h\n- Visibilidad: ${c.visibilidad} km`;
-}
-
-function formatDeportes(d) {
-  if (!d?.length) return 'No hay resultados deportivos recientes registrados.';
-  const lineas = d.map(p => `⚾ **${p.equipo_local} ${p.marcador_local ?? '-'} - ${p.marcador_visitante ?? '-'} ${p.equipo_visitante}** (${p.deporte})`);
-  return `🏆 **Resultados deportivos recientes en Caborca:**\n${lineas.join('\n')}`;
-}
-
-function formatEventos(e) {
-  if (!e?.length) return 'No hay eventos próximos registrados en Caborca.';
-  const lineas = e.map(ev => `📅 **${ev.nombre}** - ${new Date(ev.fecha_inicio).toLocaleDateString('es-MX')} | ${ev.lugar || 'Lugar por confirmar'}`);
-  return `🎉 **Próximos eventos en Caborca:**\n${lineas.join('\n')}`;
-}
-
-function formatNoticias(n) {
-  if (!n?.length) return 'No hay noticias recientes registradas.';
-  const lineas = n.map(noticia => `📰 **${noticia.titulo}** - ${new Date(noticia.created_at).toLocaleDateString('es-MX')}`);
-  return `📢 **Noticias recientes de Caborca:**\n${lineas.join('\n')}`;
 }
 
 function formatReportes(r) {
