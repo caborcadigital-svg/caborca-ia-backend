@@ -5,24 +5,62 @@ const { getNoticias } = require('./noticiasService');
 const { getDeportes } = require('./deportesService');
 const { getReportes } = require('./reportesService');
 const { askOpenAI } = require('./openaiService');
+const axios = require('axios');
+const { logger } = require('../utils/logger');
 
 const INTENTS = {
-  CLIMA: /\b(clima|tiempo|temperatura|lluvia|calor|frio|viento|pronóstico|pronostico|nublado|sol)\b/i,
-  NEGOCIOS: /\b(restaurante|negocio|tienda|servicio|comer|cenar|donde|abierto|horario|lugar|café|cafe|taqueria|farmacia)\b/i,
-  EVENTOS: /\b(evento|concierto|fiesta|actividad|que hay|que hacer|fin de semana|este fin)\b/i,
-  NOTICIAS: /\b(noticia|pasó|paso|ocurrió|ocurrio|hoy|ayer|caborca|municipio)\b/i,
-  DEPORTES: /\b(deporte|partido|juego|liga|beisbol|béisbol|futbol|fútbol|basquet|resultado|marcador|torneo)\b/i,
-  REPORTES: /\b(reporte|accidente|apagón|apagon|trafico|tráfico|reten|retén|calle cerrada|peligro|alerta)\b/i,
-  SALUDO: /^(hola|buenas|buenos|hi|hey|que tal|qué tal|como estas|cómo estás)[\s!?.]*$/i,
+  CLIMA: /\b(clima|tiempo|temperatura|lluvia|calor|frio|viento|pronóstico|pronostico|nublado|sol|fresco|húmedo)\b/i,
+  NEGOCIOS: /\b(restaurante|negocio|tienda|servicio|comer|cenar|donde|abierto|horario|lugar|café|cafe|taqueria|farmacia|hotel|supermercado)\b/i,
+  EVENTOS: /\b(evento|concierto|fiesta|actividad|que hay|que hacer|fin de semana|este fin|festival)\b/i,
+  NOTICIAS: /\b(noticia|pasó|paso|ocurrió|ocurrio|hoy|ayer|caborca|municipio|gobierno|alcalde)\b/i,
+  DEPORTES: /\b(deporte|partido|juego|liga|beisbol|béisbol|futbol|fútbol|basquet|resultado|marcador|torneo|equipo|rojos|temporada)\b/i,
+  REPORTES: /\b(reporte|accidente|apagón|apagon|trafico|tráfico|reten|retén|calle cerrada|peligro|alerta|bloqueo)\b/i,
+  SALUDO: /^(hola|buenas|buenos|hi|hey|que tal|qué tal|como estas|cómo estás|buenas tardes|buenas noches|buenos días)[\s!?.]*$/i,
 };
 
-async function resolveIntent(mensaje) {
+async function buscarTavily(query) {
+  if (!process.env.TAVILY_API_KEY) return null;
+  try {
+    const res = await axios.post('https://api.tavily.com/search', {
+      api_key: process.env.TAVILY_API_KEY,
+      query: `${query} Caborca Sonora México`,
+      search_depth: 'basic',
+      max_results: 5,
+      include_answer: true,
+    }, { timeout: 8000 });
+
+    const data = res.data;
+    const partes = [];
+
+    if (data.answer) partes.push(`Resumen: ${data.answer}`);
+
+    if (data.results?.length) {
+      data.results.slice(0, 4).forEach(r => {
+        if (r.content) partes.push(`[${r.title}] ${r.content.slice(0, 300)}`);
+      });
+    }
+
+    logger.info(`Tavily respondió con ${partes.length} resultados para: "${query}"`);
+    return partes.length ? partes.join('\n\n') : null;
+  } catch (err) {
+    logger.error('Error Tavily:', err.message);
+    return null;
+  }
+}
+
+function tieneIntentEspecifico(lower) {
+  return INTENTS.CLIMA.test(lower) || INTENTS.NEGOCIOS.test(lower) ||
+    INTENTS.EVENTOS.test(lower) || INTENTS.NOTICIAS.test(lower) ||
+    INTENTS.DEPORTES.test(lower) || INTENTS.REPORTES.test(lower);
+}
+
+async function resolveIntent(mensaje, historial = []) {
   const lower = mensaje.toLowerCase();
 
   if (INTENTS.SALUDO.test(lower.trim())) {
     return {
       tipo: 'directo',
-      respuesta: '¡Hola! Soy Caborca IA, tu asistente inteligente de Heroica Caborca, Sonora. ¿En qué puedo ayudarte hoy? Puedo darte información sobre el clima, negocios, eventos, noticias, deportes y reportes ciudadanos.',
+      respuesta: '¡Hola! Soy Caborca IA, tu asistente inteligente de Heroica Caborca, Sonora. ¿En qué puedo ayudarte hoy? Puedo darte información sobre el clima, negocios, eventos, noticias, deportes, reportes ciudadanos y mucho más sobre Caborca.',
       fuente: 'sistema',
     };
   }
@@ -39,10 +77,13 @@ async function resolveIntent(mensaje) {
 
   if (INTENTS.DEPORTES.test(lower)) {
     const deportes = await getDeportes({ limit: 5 });
-    if (!INTENTS.NEGOCIOS.test(lower) && !INTENTS.NOTICIAS.test(lower)) {
-      return { tipo: 'directo', respuesta: formatDeportes(deportes), fuente: 'supabase', data: deportes };
-    }
     contexto.deportes = deportes;
+    if (!INTENTS.NEGOCIOS.test(lower) && !INTENTS.NOTICIAS.test(lower) && deportes?.length) {
+      const webResult = await buscarTavily(mensaje);
+      if (webResult) contexto.webSearch = webResult;
+      const respuestaIA = await askOpenAI(mensaje, contexto, historial);
+      return { tipo: 'ia', respuesta: respuestaIA, fuente: 'openai', data: contexto };
+    }
   }
 
   if (INTENTS.REPORTES.test(lower)) {
@@ -65,25 +106,13 @@ async function resolveIntent(mensaje) {
     contexto.negocios = negocios;
   }
 
-  const necesitaIA =
-    INTENTS.NEGOCIOS.test(lower) ||
-    Object.keys(contexto).length > 1 ||
-    (!Object.keys(INTENTS).some(k => INTENTS[k].test(lower)));
-
-  if (necesitaIA) {
-    const respuestaIA = await askOpenAI(mensaje, contexto);
-    return { tipo: 'ia', respuesta: respuestaIA, fuente: 'openai', data: contexto };
+  if (!tieneIntentEspecifico(lower) || Object.keys(contexto).length === 0) {
+    logger.info(`Sin intent específico, buscando en Tavily: "${mensaje}"`);
+    const webResult = await buscarTavily(mensaje);
+    if (webResult) contexto.webSearch = webResult;
   }
 
-  if (contexto.eventos) {
-    return { tipo: 'directo', respuesta: formatEventos(contexto.eventos), fuente: 'supabase', data: contexto.eventos };
-  }
-
-  if (contexto.noticias) {
-    return { tipo: 'directo', respuesta: formatNoticias(contexto.noticias), fuente: 'supabase', data: contexto.noticias };
-  }
-
-  const respuestaIA = await askOpenAI(mensaje, contexto);
+  const respuestaIA = await askOpenAI(mensaje, contexto, historial);
   return { tipo: 'ia', respuesta: respuestaIA, fuente: 'openai', data: contexto };
 }
 
