@@ -9,9 +9,7 @@ Cuando tengas resultados de búsqueda web en el contexto úsalos para responder 
 Cuando uses info de internet menciona la fuente brevemente con "Según [fuente]...".
 Máximo 3 párrafos. Usa emojis ocasionalmente.
 Solo respondes temas relacionados con Caborca, Sonora y México en general.
-NUNCA inventes información específica que no esté en el contexto.
-Si no tienes información suficiente sobre algo, dilo claramente: "No tengo información verificada sobre eso en este momento."
-Cuando uses resultados de búsqueda web, cíñete EXACTAMENTE a lo que dicen los resultados, sin agregar datos extra.`;`;
+NUNCA inventes información específica que no esté en el contexto.`;
 
 async function askOpenAI(mensaje, contexto = {}, historial = []) {
   try {
@@ -72,7 +70,7 @@ async function askOpenAI(mensaje, contexto = {}, historial = []) {
       model: 'gpt-4o-mini',
       messages,
       max_tokens: 600,
-      temperature: 0.3,
+      temperature: 0.6,
     });
 
     const respuesta = response.choices[0].message.content;
