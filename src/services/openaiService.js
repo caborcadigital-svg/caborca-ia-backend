@@ -5,58 +5,55 @@ const { logger } = require('../utils/logger');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const SYSTEM_PROMPT = `Eres Caborca IA, el asistente oficial de Heroica Caborca, Sonora, México.
-Hablas en español mexicano natural. Eres preciso, útil y honesto.
-Si tienes resultados de búsqueda web en el contexto, úsalos para responder.
+Hablas en español mexicano natural, eres preciso, útil y honesto.
+Cuando tengas resultados de búsqueda web en el contexto, úsalos para responder con información real.
 Cuando uses info de internet menciona la fuente brevemente.
 Máximo 3 párrafos. Usa emojis ocasionalmente.
-Solo hablas de temas relacionados con Caborca, Sonora.`;
+Solo respondes temas relacionados con Caborca, Sonora y México en general.`;
 
-async function buscarEnInternet(query) {
+async function buscarTavily(query) {
   try {
-    const res = await axios.get('https://api.duckduckgo.com/', {
-      params: {
-        q: `${query} Caborca Sonora`,
-        format: 'json',
-        no_html: 1,
-        skip_disambig: 1,
-      },
-      timeout: 5000,
-    });
+    const res = await axios.post('https://api.tavily.com/search', {
+      api_key: process.env.TAVILY_API_KEY,
+      query: `${query} Caborca Sonora México`,
+      search_depth: 'basic',
+      max_results: 5,
+      include_answer: true,
+      include_raw_content: false,
+    }, { timeout: 8000 });
 
     const data = res.data;
-    const resultados = [];
+    const partes = [];
 
-    if (data.AbstractText) {
-      resultados.push(`[${data.AbstractSource}] ${data.AbstractText}`);
+    if (data.answer) {
+      partes.push(`Resumen: ${data.answer}`);
     }
 
-    if (data.RelatedTopics?.length) {
-      data.RelatedTopics.slice(0, 3).forEach(t => {
-        if (t.Text) resultados.push(`- ${t.Text}`);
+    if (data.results?.length) {
+      data.results.slice(0, 4).forEach(r => {
+        partes.push(`[${r.title}] ${r.content?.slice(0, 300) || ''} (${r.url})`);
       });
     }
 
-    if (data.Answer) {
-      resultados.push(`Respuesta directa: ${data.Answer}`);
-    }
-
-    return resultados.length ? resultados.join('\n') : null;
+    return partes.length ? partes.join('\n\n') : null;
   } catch (err) {
-    logger.error('Error búsqueda web:', err.message);
+    logger.error('Error Tavily:', err.message);
     return null;
   }
 }
 
-async function necesitaBusqueda(mensaje, contexto) {
-  const tieneContexto = contexto.noticias?.length || contexto.negocios?.length ||
-    contexto.eventos?.length || contexto.deportes?.length;
+function necesitaBusqueda(mensaje, contexto) {
+  const tieneContextoRelevante =
+    contexto.noticias?.some(n => mensaje.toLowerCase().split(' ').some(p => p.length > 3 && n.titulo?.toLowerCase().includes(p))) ||
+    contexto.negocios?.length > 0 ||
+    contexto.eventos?.length > 0 ||
+    contexto.deportes?.length > 0;
 
-  const palabrasClave = ['quién', 'quien', 'qué es', 'que es', 'historia', 'cuándo', 'cuando',
-    'cómo', 'como', 'dónde', 'donde', 'equipo', 'rojos', 'liga', 'torneo', 'iglesia',
-    'misión', 'mision', 'fundación', 'fundacion', 'alcalde', 'presidente', 'famoso'];
+  const esClimaOReporte = /clima|temperatura|lluvia|calor|reporte|tráfico|accidente/i.test(mensaje);
 
-  const necesita = palabrasClave.some(p => mensaje.toLowerCase().includes(p));
-  return necesita || !tieneContexto;
+  if (esClimaOReporte && (contexto.clima || contexto.reportes?.length)) return false;
+
+  return !tieneContextoRelevante;
 }
 
 async function askOpenAI(mensaje, contexto = {}, historial = []) {
@@ -64,12 +61,12 @@ async function askOpenAI(mensaje, contexto = {}, historial = []) {
     const contextoParts = [];
 
     if (contexto.clima) {
-      contextoParts.push(`CLIMA ACTUAL: ${contexto.clima.temperatura}°C, ${contexto.clima.descripcion}, humedad ${contexto.clima.humedad}%, viento ${contexto.clima.viento} km/h, máx ${contexto.clima.maxima}° mín ${contexto.clima.minima}°`);
+      contextoParts.push(`CLIMA ACTUAL EN CABORCA: ${contexto.clima.temperatura}°C, ${contexto.clima.descripcion}, humedad ${contexto.clima.humedad}%, viento ${contexto.clima.viento} km/h, máx ${contexto.clima.maxima}° mín ${contexto.clima.minima}°`);
     }
 
     if (contexto.noticias?.length) {
       const news = contexto.noticias.slice(0, 5).map(n => `- ${n.titulo}`).join('\n');
-      contextoParts.push(`NOTICIAS RECIENTES:\n${news}`);
+      contextoParts.push(`NOTICIAS RECIENTES DE CABORCA:\n${news}`);
     }
 
     if (contexto.eventos?.length) {
@@ -97,14 +94,17 @@ async function askOpenAI(mensaje, contexto = {}, historial = []) {
       const reps = contexto.reportes.slice(0, 4).map(r =>
         `- [${r.tipo}] ${r.descripcion} | ${r.ubicacion}`
       ).join('\n');
-      contextoParts.push(`REPORTES ACTIVOS:\n${reps}`);
+      contextoParts.push(`REPORTES CIUDADANOS ACTIVOS:\n${reps}`);
     }
 
-    if (await necesitaBusqueda(mensaje, contexto)) {
-      logger.info(`Buscando en internet: "${mensaje}"`);
-      const webResult = await buscarEnInternet(mensaje);
+    if (necesitaBusqueda(mensaje, contexto)) {
+      logger.info(`Buscando en Tavily: "${mensaje}"`);
+      const webResult = await buscarTavily(mensaje);
       if (webResult) {
         contextoParts.push(`RESULTADOS DE BÚSQUEDA WEB:\n${webResult}`);
+        logger.info('Tavily devolvió resultados');
+      } else {
+        logger.info('Tavily no devolvió resultados');
       }
     }
 
@@ -127,7 +127,7 @@ async function askOpenAI(mensaje, contexto = {}, historial = []) {
 
     const respuesta = response.choices[0].message.content;
     const tokens = response.usage?.total_tokens || 0;
-    logger.info(`OpenAI: ${tokens} tokens`);
+    logger.info(`OpenAI: ${tokens} tokens | "${mensaje.slice(0, 50)}"`);
 
     return respuesta;
   } catch (err) {
