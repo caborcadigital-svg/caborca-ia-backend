@@ -9,5 +9,17 @@ router.get('/', async (req, res) => {
     res.json(data);
   } catch { res.status(500).json({ error: 'Error obteniendo negocios' }); }
 });
-
+router.get('/:id', async (req, res) => {
+  try {
+    const { supabase } = require('../../config/supabase');
+    const { data, error } = await supabase
+      .from('negocios')
+      .select('*')
+      .eq('id', req.params.id)
+      .eq('activo', true)
+      .single();
+    if (error || !data) return res.status(404).json({ error: 'Negocio no encontrado' });
+    res.json(data);
+  } catch { res.status(500).json({ error: 'Error obteniendo negocio' }); }
+});
 module.exports = router;
