@@ -6,25 +6,35 @@ const router = express.Router();
 
 router.get('/', async (req, res) => {
   try {
-    const { tipo, estado = 'aprobado', limit = 20 } = req.query;
-    let query = supabase.from('reportes').select('*').eq('estado', estado).order('created_at', { ascending: false }).limit(parseInt(limit));
+    const tipo = req.query.tipo;
+    const estado = req.query.estado || 'aprobado';
+    const limit = parseInt(req.query.limit || '20');
+    let query = supabase.from('reportes').select('*').eq('estado', estado).order('created_at', { ascending: false }).limit(limit);
     if (tipo) query = query.eq('tipo', tipo);
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json(data || []);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const result = await query;
+    if (result.error) throw result.error;
+    res.json(result.data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post('/', async (req, res) => {
   try {
-    const { tipo, descripcion, ubicacion, lat, lng } = req.body;
+    const tipo = req.body.tipo;
+    const descripcion = req.body.descripcion;
+    const ubicacion = req.body.ubicacion;
+    const lat = req.body.lat;
+    const lng = req.body.lng;
     if (!descripcion || !ubicacion) return res.status(400).json({ error: 'Descripcion y ubicacion requeridas' });
     if (!tipo) return res.status(400).json({ error: 'Tipo requerido' });
-    const { data, error } = await supabase.from('reportes').insert([{ tipo, descripcion, ubicacion, lat, lng, estado: 'pendiente' }]).select().single();
-    if (error) throw error;
-    notificarNuevoReporte(data).catch(err => logger.error('Email error:', err.message));
-    res.status(201).json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const result = await supabase.from('reportes').insert([{ tipo: tipo, descripcion: descripcion, ubicacion: ubicacion, lat: lat, lng: lng, estado: 'pendiente' }]).select().single();
+    if (result.error) throw result.error;
+    notificarNuevoReporte(result.data).catch(function(err) { logger.error('Email async error: ' + err.message); });
+    res.status(201).json(result.data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
