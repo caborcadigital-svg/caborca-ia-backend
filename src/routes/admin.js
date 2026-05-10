@@ -35,7 +35,7 @@ router.get('/chat-stats', async (req, res) => {
       supabaseAdmin.from('mensajes').select('contenido').eq('rol', 'user').order('created_at', { ascending: false }).limit(200),
     ]);
 
-    const temas: Record<string, number> = { clima: 0, negocios: 0, eventos: 0, deportes: 0, noticias: 0, reportes: 0, otro: 0 };
+const temas = { clima: 0, negocios: 0, eventos: 0, deportes: 0, noticias: 0, reportes: 0, otro: 0 };
     const regexTemas: Record<string, RegExp> = {
       clima: /clima|temperatura|lluvia|calor|frío/i,
       negocios: /restaurante|negocio|comer|cenar|tienda|farmacia/i,
@@ -45,7 +45,7 @@ router.get('/chat-stats', async (req, res) => {
       reportes: /reporte|accidente|tráfico|apagón/i,
     };
 
-    (tiposMensajes.data || []).forEach((m: any) => {
+(tiposMensajes.data || []).forEach((m) => {
       let encontrado = false;
       for (const [tema, regex] of Object.entries(regexTemas)) {
         if (regex.test(m.contenido)) { temas[tema]++; encontrado = true; break; }
