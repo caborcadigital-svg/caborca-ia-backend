@@ -20,11 +20,12 @@ router.post('/', async (req, res) => {
     const { tipo, descripcion, ubicacion, lat, lng } = req.body;
     if (!descripcion || !ubicacion) return res.status(400).json({ error:'Descripción y ubicación requeridas' });
     if (!tipo) return res.status(400).json({ error:'Tipo requerido' });
-    const { data, error } = await supabaseAdmin.from('reportes').insert([{ tipo, descripcion, ubicacion, lat, lng, estado:'pendiente' }]).select().single();
+    const { data, error } = await supabase.from('reportes').insert([{ tipo, descripcion, ubicacion, lat, lng, estado:'pendiente' }]).select().single();
+e' }]).select().single();
     if (error) throw error;
     notificarNuevoReporte(data).catch(err => logger.error('Email error:', err.message));
     res.status(201).json(data);
-  } catch { res.status(500).json({ error:'Error creando reporte' }); }
+} catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 module.exports = router;
