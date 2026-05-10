@@ -21,6 +21,7 @@ const sugerenciasRoutes = require('./routes/sugerencias');
 const resultadosDeportivosRoutes = require('./routes/resultadosDeportivos');
 const configRoutes = require('./routes/config');
 const usuariosRoutes = require('./routes/usuarios');
+const emergenciasRoutes = require('./routes/emergencias');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -59,6 +60,7 @@ app.use('/api/sugerencias', sugerenciasRoutes);
 app.use('/api/resultados-deportivos', resultadosDeportivosRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/usuarios', usuariosRoutes);
+app.use('/api/emergencias', emergenciasRoutes);
 
 app.get('/api/health', function(req, res) {
   res.json({ status: 'ok', service: 'Caborca IA API', timestamp: new Date().toISOString() });
