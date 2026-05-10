@@ -35,8 +35,8 @@ router.get('/chat-stats', async (req, res) => {
       supabaseAdmin.from('mensajes').select('contenido').eq('rol', 'user').order('created_at', { ascending: false }).limit(200),
     ]);
 
-const temas = { clima: 0, negocios: 0, eventos: 0, deportes: 0, noticias: 0, reportes: 0, otro: 0 };
-    const regexTemas: Record<string, RegExp> = {
+    const temas = { clima: 0, negocios: 0, eventos: 0, deportes: 0, noticias: 0, reportes: 0, otro: 0 };
+    const regexTemas = {
       clima: /clima|temperatura|lluvia|calor|frío/i,
       negocios: /restaurante|negocio|comer|cenar|tienda|farmacia/i,
       eventos: /evento|concierto|fiesta|festival/i,
@@ -45,7 +45,7 @@ const temas = { clima: 0, negocios: 0, eventos: 0, deportes: 0, noticias: 0, rep
       reportes: /reporte|accidente|tráfico|apagón/i,
     };
 
-(tiposMensajes.data || []).forEach((m) => {
+    (tiposMensajes.data || []).forEach((m) => {
       let encontrado = false;
       for (const [tema, regex] of Object.entries(regexTemas)) {
         if (regex.test(m.contenido)) { temas[tema]++; encontrado = true; break; }
@@ -70,9 +70,7 @@ const temas = { clima: 0, negocios: 0, eventos: 0, deportes: 0, noticias: 0, rep
 
 router.get('/reportes/pendientes', async (req, res) => {
   try {
-    const { data, error } = await supabaseAdmin
-      .from('reportes').select('*').eq('estado', 'pendiente')
-      .order('created_at', { ascending: false });
+    const { data, error } = await supabaseAdmin.from('reportes').select('*').eq('estado', 'pendiente').order('created_at', { ascending: false });
     if (error) throw error;
     res.json(data || []);
   } catch { res.status(500).json({ error: 'Error obteniendo reportes' }); }
@@ -81,9 +79,7 @@ router.get('/reportes/pendientes', async (req, res) => {
 router.put('/reportes/:id/estado', async (req, res) => {
   try {
     const { estado } = req.body;
-    const { data, error } = await supabaseAdmin
-      .from('reportes').update({ estado, updated_at: new Date().toISOString() })
-      .eq('id', req.params.id).select().single();
+    const { data, error } = await supabaseAdmin.from('reportes').update({ estado, updated_at: new Date().toISOString() }).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json(data);
   } catch { res.status(500).json({ error: 'Error actualizando reporte' }); }
