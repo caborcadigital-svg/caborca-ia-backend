@@ -1,26 +1,30 @@
 const express = require('express');
-const { getReportes, crearReporte } = require('../services/reportesService');
+const { supabase, supabaseAdmin } = require('../../config/supabase');
+const { notificarNuevoReporte } = require('../services/emailService');
+const { logger } = require('../utils/logger');
 const router = express.Router();
 
 router.get('/', async (req, res) => {
   try {
-    const { tipo, limit = 20, page = 1 } = req.query;
-    const data = await getReportes({ estado: 'aprobado', tipo, limit: parseInt(limit), page: parseInt(page) });
-    res.json(data);
-  } catch { res.status(500).json({ error: 'Error obteniendo reportes' }); }
+    const { tipo, estado = 'aprobado', limit = 20 } = req.query;
+    let query = supabase.from('reportes').select('*').eq('estado', estado).order('created_at', { ascending:false }).limit(parseInt(limit));
+    if (tipo) query = query.eq('tipo', tipo);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data || []);
+  } catch { res.status(500).json({ error:'Error obteniendo reportes' }); }
 });
 
 router.post('/', async (req, res) => {
   try {
-    const { tipo, descripcion, ubicacion, usuario_id } = req.body;
-    if (!tipo || !descripcion || !ubicacion) {
-      return res.status(400).json({ error: 'Tipo, descripción y ubicación son requeridos' });
-    }
-    const reporte = await crearReporte({ tipo, descripcion, ubicacion, usuario_id });
-    res.status(201).json(reporte);
-  } catch (err) {
-    res.status(500).json({ error: err.message || 'Error creando reporte' });
-  }
+    const { tipo, descripcion, ubicacion, lat, lng } = req.body;
+    if (!descripcion || !ubicacion) return res.status(400).json({ error:'Descripción y ubicación requeridas' });
+    if (!tipo) return res.status(400).json({ error:'Tipo requerido' });
+    const { data, error } = await supabaseAdmin.from('reportes').insert([{ tipo, descripcion, ubicacion, lat, lng, estado:'pendiente' }]).select().single();
+    if (error) throw error;
+    notificarNuevoReporte(data).catch(err => logger.error('Email error:', err.message));
+    res.status(201).json(data);
+  } catch { res.status(500).json({ error:'Error creando reporte' }); }
 });
 
 module.exports = router;
