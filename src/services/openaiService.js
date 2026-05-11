@@ -178,3 +178,16 @@ async function generarRespuesta(mensaje, historial) {
 }
 
 module.exports = { generarRespuesta };
+
+
+async function askOpenAI(mensaje, contexto, historial) {
+  try {
+    var resultado = await generarRespuesta(mensaje, historial);
+    return resultado.respuesta;
+  } catch (err) {
+    logger.error('askOpenAI error: ' + err.message);
+    return 'Lo siento, no pude procesar tu pregunta en este momento. Intenta de nuevo.';
+  }
+}
+
+module.exports = { generarRespuesta, askOpenAI };
